@@ -1,0 +1,30 @@
+# Rust
+/target/
+**/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo lock files
+Cargo.lock
+
+# Configuration files with sensitive data
+**/config.toml
+!**/config.toml.template
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*~

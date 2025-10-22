@@ -1,0 +1,34 @@
+# PC情報収集システム サーバー側設定ファイル
+# バージョン: 2.1
+
+[server]
+host = "0.0.0.0"
+port = 8080
+request_timeout_secs = 30
+
+[database]
+# データベース接続URL
+# 形式: mysql://ユーザー名:パスワード@ホスト:ポート/データベース名
+# 開発環境（XAMPP使用時）: mysql://root@localhost:3306/pc_inventory
+# 本番環境例: mysql://pc_inventory_user:パスワード@localhost:3306/pc_inventory
+url = "mysql://root@localhost:3306/pc_inventory"
+max_connections = 10
+connection_timeout_secs = 5
+idle_timeout_secs = 600
+
+[logging]
+# ログレベル: trace, debug, info, warn, error
+level = "info"
+file = "server.log"
+max_file_size_mb = 100
+max_backup_files = 5
+
+[api]
+endpoint_path = "/api/pc-info"
+
+# Future: セキュリティ設定（将来対応）
+# [security]
+# enable_tls = false
+# tls_cert_path = ""
+# tls_key_path = ""
+# encryption_key = ""
