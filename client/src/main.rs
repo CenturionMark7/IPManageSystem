@@ -1,5 +1,6 @@
 mod config;
 mod error;
+mod network;
 mod wmi;
 
 fn main() {
