@@ -1,6 +1,33 @@
 [package]
 name = "pc-inventory-client"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+# WMI情報取得
+wmi = "0.13"
+
+# ネットワーク情報取得
+network-interface = "2.0"
+
+# 設定ファイル
+config = "0.14"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+
+# エラーハンドリング
+thiserror = "2.0"
+
+# 非同期ランタイム
+tokio = { version = "1.0", features = ["full"] }
+
+# HTTP通信
+reqwest = { version = "0.12", features = ["json"] }
+
+# ログ出力
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+
+# 日時処理
+chrono = { version = "0.4", features = ["serde"] }

@@ -1,3 +1,7 @@
+mod config;
+mod error;
+mod wmi;
+
 fn main() {
-    println!("Hello, world!");
+    println!("PC Inventory Client");
 }
