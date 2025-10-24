@@ -24,6 +24,8 @@ impl PcInfoRepository {
     /// * `Ok(None)` - レコードが見つからなかった場合
     /// * `Err(SqlxError)` - データベースエラーが発生した場合
     pub async fn find_by_uuid(&self, uuid: &str) -> Result<Option<PcInfo>, SqlxError> {
+        tracing::debug!("Searching for PC info with UUID: {}", uuid);
+
         let result = sqlx::query_as::<_, PcInfo>(
             r#"
             SELECT id, uuid, mac_address, network_type, user_name,
@@ -37,6 +39,12 @@ impl PcInfoRepository {
         .fetch_optional(&self.pool)
         .await?;
 
+        if let Some(ref pc_info) = result {
+            tracing::debug!("Found existing PC info with ID: {}", pc_info.id);
+        } else {
+            tracing::debug!("No existing PC info found for UUID: {}", uuid);
+        }
+
         Ok(result)
     }
 
@@ -49,6 +57,7 @@ impl PcInfoRepository {
     /// * `Ok(i32)` - 作成されたレコードのID
     /// * `Err(SqlxError)` - データベースエラーが発生した場合
     pub async fn create(&self, request: &PcInfoRequest) -> Result<i32, SqlxError> {
+        tracing::debug!("Creating new PC info record for UUID: {}", request.uuid);
         let now = Utc::now();
 
         let result = sqlx::query(
@@ -73,7 +82,10 @@ impl PcInfoRepository {
         .execute(&self.pool)
         .await?;
 
-        Ok(result.last_insert_id() as i32)
+        let id = result.last_insert_id() as i32;
+        tracing::debug!("Successfully created PC info record with ID: {}", id);
+
+        Ok(id)
     }
 
     /// 既存のPC情報レコードを更新
@@ -86,9 +98,10 @@ impl PcInfoRepository {
     /// * `Ok(())` - 更新成功
     /// * `Err(SqlxError)` - データベースエラーが発生した場合
     pub async fn update(&self, id: i32, request: &PcInfoRequest) -> Result<(), SqlxError> {
+        tracing::debug!("Updating PC info record ID: {} for UUID: {}", id, request.uuid);
         let now = Utc::now();
 
-        sqlx::query(
+        let result = sqlx::query(
             r#"
             UPDATE pc_info
             SET mac_address = ?,
@@ -113,6 +126,8 @@ impl PcInfoRepository {
         .bind(id)
         .execute(&self.pool)
         .await?;
+
+        tracing::debug!("Successfully updated PC info record ID: {}, rows affected: {}", id, result.rows_affected());
 
         Ok(())
     }
