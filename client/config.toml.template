@@ -2,9 +2,9 @@
 # バージョン: 2.1
 
 [server]
-# サーバーのURL（エンドポイントまで含めて指定）
-# 例: http://192.168.1.10:8080/api/pc-info
-url = "http://localhost:8080/api/pc-info"
+# サーバーのURL（ベースURLのみ、エンドポイントパスは不要）
+# 例: http://192.168.1.10:8080
+url = "http://localhost:8080"
 request_timeout_secs = 30
 
 [client]
