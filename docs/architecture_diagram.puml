@@ -1,0 +1,164 @@
+@startuml システムアーキテクチャ図
+
+!define RECTANGLE_COLOR #E8F5E9
+!define CLIENT_COLOR #BBDEFB
+!define SERVER_COLOR #FFCCBC
+!define DB_COLOR #FFF9C4
+
+' タイトル
+title PC情報収集システム - システムアーキテクチャ v2.1
+
+' クライアント側
+package "クライアント側 (各PC)" <<Node>> {
+    rectangle "pc-inventory-client.exe" as Client #CLIENT_COLOR {
+
+        rectangle "起動エントリーポイント\n(main.rs)" as ClientMain {
+            note right
+                **役割**: クライアントアプリケーションのメイン制御
+                ・設定ファイル読み込み
+                ・ログ初期化
+                ・起動時処理とタイマー制御
+            end note
+        }
+
+        rectangle "設定管理\n(config.rs)" as ClientConfig
+        rectangle "WMI情報収集\n(wmi/collector.rs)" as WMI
+        rectangle "ネットワーク検出\n(network/detector.rs)" as Network
+        rectangle "API通信\n(api/client.rs)" as ApiClient
+        rectangle "リトライ処理\n(main.rs)" as Retry
+        rectangle "ログ出力\n(logging.rs)" as ClientLog
+
+        ClientMain --> ClientConfig : 設定読み込み
+        ClientMain --> ClientLog : ログ初期化
+        ClientMain --> WMI : UUID・OS・機種取得
+        ClientMain --> Network : IP・MAC・種別取得
+        ClientMain --> ApiClient : データ送信
+        ClientMain --> Retry : 送信失敗時
+        Retry --> ApiClient : リトライ送信
+    }
+
+    rectangle "config.toml" as ClientConfigFile #RECTANGLE_COLOR
+    rectangle "client.log" as ClientLogFile #RECTANGLE_COLOR
+
+    Client --> ClientConfigFile : 読み書き
+    Client --> ClientLogFile : 書き込み
+
+    note right of ClientConfigFile
+        **設定ファイル**
+        ・サーバーURL
+        ・送信間隔（デフォルト6時間）
+        ・リトライ設定
+        ・使用者名
+        ・自動更新される項目（UUID、MAC等）
+    end note
+}
+
+' ネットワーク通信
+rectangle "HTTP通信" as HTTP {
+    note right
+        **通信プロトコル**
+        ・HTTP POST /api/pc-info
+        ・Content-Type: application/json
+        ・タイムアウト: 30秒
+    end note
+}
+
+Client -down-> HTTP : POST /api/pc-info\n(JSON)
+
+' サーバー側
+package "サーバー側 (1台)" <<Node>> {
+    rectangle "pc-inventory-server.exe" as Server #SERVER_COLOR {
+
+        rectangle "起動エントリーポイント\n(main.rs)" as ServerMain {
+            note left
+                **役割**: サーバーアプリケーションのメイン制御
+                ・設定ファイル読み込み
+                ・データベース接続プール作成
+                ・ログ初期化
+                ・Axumサーバー起動（0.0.0.0:8080）
+            end note
+        }
+
+        rectangle "設定管理\n(config.rs)" as ServerConfig
+        rectangle "ルーティング\n(Router)" as Router
+        rectangle "APIハンドラー\n(handlers/pc_info.rs)" as Handler
+        rectangle "リポジトリ\n(db/repository.rs)" as Repository
+        rectangle "データモデル\n(models/pc_info.rs)" as Model
+        rectangle "エラー処理\n(error.rs)" as ServerError
+        rectangle "ログ出力\n(logging.rs)" as ServerLog
+
+        ServerMain --> ServerConfig : 設定読み込み
+        ServerMain --> ServerLog : ログ初期化
+        ServerMain --> Repository : DBプール作成
+        ServerMain --> Router : ルーティング設定
+        Router --> Handler : リクエスト転送
+        Handler --> Model : リクエスト検証
+        Handler --> Repository : UPSERT処理
+        Handler --> ServerError : エラー変換
+        Repository --> Model : データマッピング
+    }
+
+    rectangle "config.toml" as ServerConfigFile #RECTANGLE_COLOR
+    rectangle "server.log" as ServerLogFile #RECTANGLE_COLOR
+
+    Server --> ServerConfigFile : 読み込み
+    Server --> ServerLogFile : 書き込み
+
+    note left of ServerConfigFile
+        **設定ファイル**
+        ・データベース接続URL
+        ・サーバーポート（デフォルト8080）
+        ・接続プール設定
+        ・ログレベル
+    end note
+}
+
+HTTP -down-> Server : リクエスト受信
+
+' データベース
+database "MySQL / MariaDB" as DB #DB_COLOR {
+    rectangle "pc_inventory" as DBName {
+        rectangle "pc_info テーブル" as Table
+    }
+}
+
+Server --> DB : SQLクエリ実行\n(UPSERT)
+
+note right of DB
+    **データベース**
+    ・pc_infoテーブル
+    ・UUID（ユニーク制約）で重複チェック
+    ・存在しない場合はINSERT
+    ・存在する場合はUPDATE
+end note
+
+' データ参照
+actor "管理者" as Admin
+rectangle "Excel / MySQL Workbench" as Tools #RECTANGLE_COLOR
+
+Admin --> Tools : データ参照
+Tools --> DB : SELECT クエリ
+
+note right of Tools
+    **データ参照方法**
+    ・Excel: MySQLデータソース接続
+    ・MySQL Workbench: 直接SQL実行
+    ・定期レポート生成
+end note
+
+' タイミング図への参照
+note bottom
+    **動作タイミング**
+    ====
+    1. クライアント起動時: 即座にデータ送信
+    2. 定期送信: 6時間ごと（デフォルト）
+    3. 送信失敗時: リトライサイクル開始
+       - 1回目: 15分後
+       - 2回目: 1時間後
+       - 以降、15分 → 1時間を繰り返す
+    4. サーバー復旧時: リトライ成功でサイクル終了
+
+    詳細は sequence_diagram.puml を参照
+end note
+
+@enduml

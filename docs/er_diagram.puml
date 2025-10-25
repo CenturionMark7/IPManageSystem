@@ -1,0 +1,87 @@
+@startuml ER図 - PC情報収集システム
+
+' スタイル設定
+skinparam linetype ortho
+skinparam backgroundColor #FEFEFE
+skinparam class {
+    BackgroundColor<<table>> LightBlue
+    BorderColor<<table>> Black
+    ArrowColor Black
+}
+
+' データベース定義
+package "Database: pc_inventory" {
+
+    ' pc_infoテーブル
+    entity "pc_info" <<table>> {
+        --主キー--
+        + **id**: INT(AUTO_INCREMENT) <<PK>>
+        --ユニーク制約--
+        * **uuid**: VARCHAR(100) <<UK>>
+        --データ項目--
+        * mac_address: VARCHAR(17)
+        * network_type: VARCHAR(20)
+        * user_name: VARCHAR(50)
+        * ip_address: VARCHAR(15)
+        * os: VARCHAR(100)
+        * os_version: VARCHAR(100)
+        * model_name: VARCHAR(100)
+        --監査項目--
+        * created_at: DATETIME
+        * updated_at: DATETIME
+        --インデックス--
+        {INDEX} idx_uuid (uuid)
+        {INDEX} idx_updated_at (updated_at)
+    }
+}
+
+' 説明ノート
+note right of "pc_info"
+  **テーブル説明**
+  ====
+  PC情報を格納するメインテーブル。
+  各PCはUUID（マザーボードシリアル）で一意に識別される。
+
+  **主キー (id)**
+  自動採番される内部ID。APIレスポンスに使用。
+
+  **ユニーク制約 (uuid)**
+  マザーボードのシリアル番号（WMI: Win32_BaseBoard.SerialNumber）
+  PCの物理的な一意性を保証する。
+  同じUUIDの場合は既存レコードを更新（UPSERT）。
+
+  **ネットワーク情報**
+  - mac_address: ネットワークアダプタのMACアドレス
+    有線・無線で異なるが、UUIDで一意性を保証するため問題なし
+  - network_type: "Ethernet" または "Wi-Fi"
+  - ip_address: 現在のIPv4アドレス
+
+  **PC情報**
+  - user_name: 使用者名（config.tomlで設定）
+  - os: OS名（例: "Microsoft Windows 10 Pro"）
+  - os_version: OSバージョン（例: "10.0.19045"）
+  - model_name: PC機種名（例: "ThinkPad X1 Carbon"）
+
+  **監査項目**
+  - created_at: 初回登録日時（新規作成時のみ）
+  - updated_at: 最終更新日時（毎回更新）
+
+  **インデックス**
+  - idx_uuid: UUID検索の高速化（UPSERT処理で使用）
+  - idx_updated_at: 最終更新日時での検索・ソートの高速化
+end note
+
+' データフロー説明
+note as DataFlow
+  **データフロー**
+  ====
+  1. クライアント起動時、WMIからUUID・OS・機種名を取得
+  2. ネットワーク情報（IP・MAC・種別）を検出
+  3. サーバーにPOST /api/pc-info
+  4. サーバーはUUIDで既存レコードを検索
+     - 存在しない → INSERT (created_at, updated_at設定)
+     - 存在する   → UPDATE (updated_atのみ更新)
+  5. 6時間ごとに定期的にステップ2-4を繰り返し
+end note
+
+@enduml

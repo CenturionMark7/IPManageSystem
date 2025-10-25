@@ -1,0 +1,220 @@
+@startuml シーケンス図 - PC情報送信フロー
+
+title PC情報収集システム - 正常系シーケンス図
+
+actor "Windows PC" as PC
+participant "pc-inventory-client.exe\n(main.rs)" as Client
+participant "WmiCollector\n(wmi/collector.rs)" as WMI
+participant "NetworkDetector\n(network/detector.rs)" as Network
+participant "ApiClient\n(api/client.rs)" as ApiClient
+participant "config.toml" as ConfigFile
+participant "HTTP" as HTTP
+participant "pc-inventory-server.exe\n(main.rs)" as Server
+participant "PcInfoHandler\n(handlers/pc_info.rs)" as Handler
+participant "PcInfoRepository\n(db/repository.rs)" as Repository
+database "MySQL\npc_inventory.pc_info" as DB
+
+== 起動時処理 ==
+
+PC -> Client: プロセス起動
+activate Client
+
+Client -> ConfigFile: load("config.toml")
+activate ConfigFile
+ConfigFile --> Client: ClientConfig
+deactivate ConfigFile
+
+note right of Client
+  **設定読み込み**
+  - サーバーURL
+  - 送信間隔
+  - user_name等
+end note
+
+Client -> Client: init_logging()
+note right of Client
+  **ログ初期化**
+  - client.logへ出力開始
+end note
+
+Client -> Client: user_name検証
+note right of Client
+  空白の場合はエラーで終了
+end note
+
+Client -> WMI: WmiCollector::new()
+activate WMI
+WMI -> WMI: COMLibrary初期化
+WMI -> WMI: WMIConnection作成
+WMI --> Client: WmiCollector
+deactivate WMI
+
+Client -> WMI: get_uuid()
+activate WMI
+WMI -> PC: WMIクエリ:\nSELECT SerialNumber\nFROM Win32_BaseBoard
+PC --> WMI: "37C03080-257C-11F0-..."
+WMI --> Client: uuid
+deactivate WMI
+
+Client -> WMI: get_model_name()
+activate WMI
+WMI -> PC: WMIクエリ:\nSELECT Model\nFROM Win32_ComputerSystem
+PC --> WMI: "ThinkPad X1 Carbon"
+WMI --> Client: model_name
+deactivate WMI
+
+Client -> WMI: get_os_info()
+activate WMI
+WMI -> PC: WMIクエリ:\nSELECT Caption, Version\nFROM Win32_OperatingSystem
+PC --> WMI: ("Microsoft Windows 11 Pro", "10.0.22631")
+WMI --> Client: (os, os_version)
+deactivate WMI
+
+Client -> Network: NetworkDetector::get_active_adapter()
+activate Network
+Network -> PC: NetworkInterface::show()
+PC --> Network: Vec<NetworkInterface>
+Network -> Network: アクティブアダプタ検出\n（IPv4, 非ループバック等）
+Network -> Network: MACアドレス取得
+Network -> Network: ネットワークタイプ判定\n("Ethernet" or "Wi-Fi")
+Network --> Client: NetworkInfo\n(IP, MAC, Type)
+deactivate Network
+
+Client -> ConfigFile: update_pc_info(wmi_info, net_info)
+activate ConfigFile
+Client -> ConfigFile: save()
+ConfigFile --> Client: Ok
+deactivate ConfigFile
+
+note right of Client
+  **設定ファイル更新**
+  - UUID、機種名、OS等を保存
+  - MACアドレス、IPアドレス更新
+end note
+
+Client -> ApiClient: ApiClient::new(server_url, timeout)
+activate ApiClient
+ApiClient -> ApiClient: reqwest::Client構築
+ApiClient --> Client: ApiClient
+deactivate ApiClient
+
+Client -> ApiClient: send_pc_info(pc_info_data)
+activate ApiClient
+
+ApiClient -> HTTP: POST /api/pc-info\nContent-Type: application/json\n{\n  "uuid": "37C03080...",\n  "mac_address": "4C:23:38:FB:41:C5",\n  "network_type": "Wi-Fi",\n  "user_name": "山田太郎",\n  "ip_address": "192.168.3.3",\n  "os": "Microsoft Windows 11 Pro",\n  "os_version": "10.0.22631",\n  "model_name": "ThinkPad X1 Carbon"\n}
+activate HTTP
+
+HTTP -> Server: HTTP Request
+activate Server
+
+Server -> Handler: handle_pc_info(State(repo), Json(payload))
+activate Handler
+
+Handler -> Handler: payload.validate()
+note right of Handler
+  uuid必須チェック等
+end note
+
+Handler -> Repository: upsert(payload)
+activate Repository
+
+Repository -> DB: SELECT * FROM pc_info\nWHERE uuid = '37C03080...'
+activate DB
+DB --> Repository: Option<PcInfo>
+
+alt 既存レコードなし (初回登録)
+    Repository -> DB: INSERT INTO pc_info (\n  uuid, mac_address, network_type,\n  user_name, ip_address, os,\n  os_version, model_name,\n  created_at, updated_at\n) VALUES (\n  '37C03080...', '4C:23:38:FB:41:C5', 'Wi-Fi',\n  '山田太郎', '192.168.3.3',\n  'Microsoft Windows 11 Pro',\n  '10.0.22631', 'ThinkPad X1 Carbon',\n  NOW(), NOW()\n)
+    DB --> Repository: INSERT成功\nlast_insert_id() = 1
+    Repository --> Handler: ("created", 1)
+
+else 既存レコードあり (更新)
+    Repository -> DB: UPDATE pc_info SET\n  mac_address = '4C:23:38:FB:41:C5',\n  network_type = 'Wi-Fi',\n  user_name = '山田太郎',\n  ip_address = '192.168.3.3',\n  os = 'Microsoft Windows 11 Pro',\n  os_version = '10.0.22631',\n  model_name = 'ThinkPad X1 Carbon',\n  updated_at = NOW()\nWHERE id = 1
+    DB --> Repository: UPDATE成功
+    Repository --> Handler: ("updated", 1)
+end
+
+deactivate DB
+deactivate Repository
+
+Handler -> Handler: PcInfoResponse構築\n{\n  "status": "success",\n  "action": "updated",\n  "id": 1\n}
+
+Handler --> Server: Json(PcInfoResponse)
+deactivate Handler
+
+Server -> HTTP: HTTP 200 OK\n{\n  "status": "success",\n  "action": "updated",\n  "id": 1\n}
+deactivate Server
+
+HTTP --> ApiClient: ApiResponse
+deactivate HTTP
+
+ApiClient --> Client: Ok(ApiResponse)
+deactivate ApiClient
+
+note right of Client
+  **送信成功**
+  ログ出力:
+  [INFO] PC info sent successfully.
+         Action: updated, ID: 1
+end note
+
+Client -> ConfigFile: update_last_send_datetime()
+activate ConfigFile
+Client -> ConfigFile: save()
+ConfigFile --> Client: Ok
+deactivate ConfigFile
+
+note right of Client
+  **最終送信日時更新**
+  next送信: 6時間後
+end note
+
+Client -> Client: タイマー起動\ninterval(check_interval_secs)
+
+note right of Client
+  **定期チェックモード**
+  1時間ごとにチェック
+  6時間経過したら再送信
+end note
+
+== 定期チェック（6時間後） ==
+
+Client -> Client: timer.tick()
+Client -> Client: periodic_check()
+
+Client -> ConfigFile: load()
+activate ConfigFile
+ConfigFile --> Client: config
+deactivate ConfigFile
+
+Client -> Client: 送信間隔チェック\n(last_send_datetime + send_interval_secs)
+
+note right of Client
+  6時間経過したので送信実行
+end note
+
+Client -> Network: get_active_adapter()
+activate Network
+Network --> Client: NetworkInfo\n(最新のIP・MAC)
+deactivate Network
+
+note right of Client
+  IPアドレスやMACアドレスが
+  変わっている可能性がある
+end note
+
+Client -> ApiClient: send_pc_info(updated_data)
+activate ApiClient
+ApiClient -> HTTP: POST /api/pc-info\n(最新情報)
+HTTP -> Server: ...
+Server --> HTTP: 200 OK
+HTTP --> ApiClient: ApiResponse
+ApiClient --> Client: Ok
+deactivate ApiClient
+
+Client -> ConfigFile: update_last_send_datetime()\nsave()
+
+note right of Client
+  次回送信: さらに6時間後
+end note
+
+@enduml
