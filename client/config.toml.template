@@ -1,38 +1,35 @@
-# PC情報収集システム クライアント側設定ファイル
+# PC情報収集システム クライアント側設定ファイル（テンプレート）
 # バージョン: 2.1
+#
+# 使用方法:
+# 1. このファイルを config.toml にコピー
+# 2. 各項目を環境に合わせて編集
+# 3. 特に [pc_info] セクションの user_name は必須
 
 [server]
-# サーバーのURL（ベースURLのみ、エンドポイントパスは不要）
-# 例: http://192.168.1.10:8080
-url = "http://localhost:8080"
+# サーバーのURL（エンドポイント含む）
+url = "http://SERVER_IP_ADDRESS:8080/api/pc-info"
+# リクエストタイムアウト（秒）
 request_timeout_secs = 30
 
 [client]
-# 最終送信日時（自動更新されます）
+# 最終送信日時（自動更新されます、初回は空でOK）
 last_send_datetime = ""
-
-# チェック間隔（秒） - 定期的にタイマーで確認する間隔
-# デフォルト: 3600秒 = 1時間
+# チェック間隔（秒） - 定期送信の確認間隔
 check_interval_secs = 3600
-
-# 送信間隔（秒） - この時間が経過したら再送信
-# デフォルト: 21600秒 = 6時間
+# 送信間隔（秒） - デフォルト6時間 = 21600秒
 send_interval_secs = 21600
 
 [retry]
-# 送信失敗時の1回目リトライまでの待機時間（秒）
-# デフォルト: 900秒 = 15分
+# 送信失敗時の1回目リトライ待機時間（秒） - デフォルト15分 = 900秒
 first_retry_delay_secs = 900
-
-# 送信失敗時の2回目リトライまでの待機時間（秒）
-# デフォルト: 3600秒 = 1時間
+# 送信失敗時の2回目リトライ待機時間（秒） - デフォルト1時間 = 3600秒
 second_retry_delay_secs = 3600
 
 [pc_info]
-# 使用者名（必須 - 初回起動前に必ず入力してください）
-user_name = ""
-
-# 以下の項目は自動取得されるため、空白のままにしてください
+# 使用者名（必須）- PCの使用者名を入力してください
+user_name = "YOUR_NAME_HERE"
+# 以下の項目は自動的に取得・更新されます（空欄のままでOK）
 uuid = ""
 mac_address = ""
 network_type = ""
@@ -44,11 +41,9 @@ model_name = ""
 [logging]
 # ログレベル: trace, debug, info, warn, error
 level = "info"
+# ログファイル名
 file = "client.log"
+# ログファイル最大サイズ（MB）
 max_file_size_mb = 50
+# バックアップファイル数
 max_backup_files = 3
-
-# Future: セキュリティ設定（将来対応）
-# [security]
-# enable_tls = false
-# encryption_key = ""

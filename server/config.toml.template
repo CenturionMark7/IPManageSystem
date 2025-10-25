@@ -1,29 +1,55 @@
-# PC情報収集システム サーバー側設定ファイル
+# PC情報収集システム サーバー側設定ファイル（テンプレート）
 # バージョン: 2.1
+#
+# 使用方法:
+# 1. このファイルを config.toml にコピー
+# 2. 各項目を環境に合わせて編集
+# 3. 特に [database] セクションの接続情報は必ず変更してください
 
 [server]
+# サーバーのバインドアドレス
+# 0.0.0.0: すべてのネットワークインターフェースでリッスン
+# 127.0.0.1: ローカルホストのみ
 host = "0.0.0.0"
+# サーバーのポート番号
 port = 8080
+# リクエストタイムアウト（秒）
 request_timeout_secs = 30
 
 [database]
 # データベース接続URL
 # 形式: mysql://ユーザー名:パスワード@ホスト:ポート/データベース名
-# 開発環境（XAMPP使用時）: mysql://root@localhost:3306/pc_inventory
-# 本番環境例: mysql://pc_inventory_user:パスワード@localhost:3306/pc_inventory
-url = "mysql://root@localhost:3306/pc_inventory"
+#
+# 開発環境例（XAMPP使用時）:
+#   url = "mysql://root@localhost:3306/pc_inventory"
+#
+# 本番環境例:
+#   url = "mysql://pc_inventory_user:STRONG_PASSWORD@localhost:3306/pc_inventory"
+#
+# セキュリティ上の注意:
+# - rootユーザーは本番環境では使用しないでください
+# - 専用のデータベースユーザーを作成し、必要最小限の権限のみ付与してください
+url = "mysql://DB_USER:DB_PASSWORD@DB_HOST:3306/pc_inventory"
+
+# 接続プール最大接続数
 max_connections = 10
+# 接続タイムアウト（秒）
 connection_timeout_secs = 5
+# アイドルタイムアウト（秒）
 idle_timeout_secs = 600
 
 [logging]
 # ログレベル: trace, debug, info, warn, error
 level = "info"
+# ログファイル名
 file = "server.log"
+# ログファイル最大サイズ（MB）
 max_file_size_mb = 100
+# バックアップファイル数
 max_backup_files = 5
 
 [api]
+# APIエンドポイントパス
 endpoint_path = "/api/pc-info"
 
 # Future: セキュリティ設定（将来対応）
