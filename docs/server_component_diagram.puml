@@ -1,313 +1,181 @@
-@startuml コンポーネント相関図 - サーバー側
+@startuml component_diagram_server
 
-title PC情報収集システム - サーバー側コンポーネント相関図
+title PC Inventory System - Server Component Diagram
 
-' スタイル
 skinparam componentStyle rectangle
-skinparam backgroundColor #FEFEFE
+skinparam rectangleFontSize 10
+skinparam noteFontSize 9
 
 package "pc-inventory-server" {
 
-    ' エントリーポイント
-    component "main.rs\n【エントリーポイント】" as Main {
-        port "main()" as MainFunc
+    ' Entry Point
+    rectangle "main.rs\n====\nエントリーポイント\n・非同期ランタイム起動\n・設定ファイル読み込み\n・ログシステム初期化\n・DBプール作成\n・Axumルーター構築\n・サーバー起動\n・0.0.0.0:8080" as Main #LightBlue
 
-        note right of MainFunc
-            **main関数の役割**
-            ====
-            1. 非同期ランタイム起動（#[tokio::main]）
-            2. 設定ファイル読み込み
-            3. ログシステム初期化
-            4. データベース接続プール作成
-            5. Axumサーバーセットアップ
-            6. ルーティング設定
-            7. サーバー起動（0.0.0.0:8080）
-        end note
-    }
+    ' Configuration
+    rectangle "config.rs\n====\n設定管理\n・ServerConfig構造体\n・ServerSettings\n・DatabaseSettings\n・LoggingSettings\n・ApiSettings\n・load()メソッド" as Config #LightGreen
 
-    ' 設定管理
-    component "config.rs\n【設定管理】" as Config {
-        class "ServerConfig" {
-            + server: ServerSettings
-            + database: DatabaseSettings
-            + logging: LoggingSettings
-            + api: ApiSettings
-            --
-            + load(path: &str) -> Result<Self>
-        }
+    ' Data Models
+    rectangle "models/pc_info.rs\n====\nデータモデル\n・PcInfo構造体\n・PcInfoRequest\n・PcInfoResponse\n・ErrorResponse\n・serde対応\n・validate()メソッド" as Model #LightYellow
 
-        class "ServerSettings" {
-            + host: String
-            + port: u16
-            + request_timeout_secs: u64
-        }
+    ' Repository
+    rectangle "db/repository.rs\n====\nリポジトリ\n・PcInfoRepository\n・find_by_uuid()\n・create()\n・update()\n・upsert()\n・MySqlPool管理" as Repository #LightCyan
 
-        class "DatabaseSettings" {
-            + url: String
-            + max_connections: u32
-            + connection_timeout_secs: u64
-            + idle_timeout_secs: u64
-        }
+    ' API Handler
+    rectangle "handlers/pc_info.rs\n====\nAPIハンドラー\n・handle_pc_info()\n・Json<PcInfoRequest>\n・State<Repository>\n・バリデーション\n・レスポンス生成\n・エラー変換" as Handler #LightCoral
 
-        note right of ServerConfig
-            **役割**: サーバー設定を保持
-            - config.tomlから読み込み
-            - 各種設定の一元管理
-        end note
-    }
+    ' Router
+    rectangle "Router\n====\nHTTPルーティング\n・POST /api/pc-info\n・TraceLayerミドルウェア\n・State共有\n・handle_pc_info呼出" as Router #LightSalmon
 
-    ' データモデル
-    component "models/pc_info.rs\n【データモデル】" as Model {
-        class "PcInfo" {
-            + id: i32
-            + uuid: String
-            + mac_address: Option<String>
-            + network_type: Option<String>
-            + user_name: Option<String>
-            + ip_address: Option<String>
-            + os: Option<String>
-            + os_version: Option<String>
-            + model_name: Option<String>
-            + created_at: DateTime<Utc>
-            + updated_at: DateTime<Utc>
-        }
+    ' Logging
+    rectangle "logging.rs\n====\nログ管理\n・init_logging()\n・tracing-subscriber\n・ファイルローテーション\n・server.log出力" as Logging #LightGray
 
-        class "PcInfoRequest" {
-            + uuid: String
-            + mac_address: String
-            + network_type: String
-            + user_name: String
-            + ip_address: String
-            + os: String
-            + os_version: String
-            + model_name: String
-            --
-            + validate(&self) -> Result<()>
-        }
+    ' Error Handling
+    rectangle "error.rs\n====\nエラー処理\n・ServerError列挙型\n・DatabaseError\n・ConfigError\n・InvalidRequest\n・IntoResponse実装\n・HTTPステータス変換" as Error #LightPink
 
-        class "PcInfoResponse" {
-            + status: String
-            + action: String
-            + id: i32
-        }
+    ' External Systems
+    database "MySQL/MariaDB\npc_inventory.pc_info" as DB
+    cloud "HTTP Client" as HTTPClient
 
-        class "ErrorResponse" {
-            + status: String
-            + message: String
-        }
+    ' Call Flow from Entry Point
+    Main --> Config : 1. ServerConfig::load()\n設定読み込み
+    Main --> Logging : 2. init_logging()\nログ初期化
+    Main --> Repository : 3. MySqlPool::connect()\nPcInfoRepository::new()\nDBプール作成
+    Main --> Router : 4. Router::new()\nroute設定\nwith_state()\nルーティング構築
+    Main --> Router : 5. axum::serve()\nサーバー起動
 
-        note right of Model
-            **役割**: データ構造定義
-            - PcInfo: データベースレコード
-            - PcInfoRequest: APIリクエスト
-            - PcInfoResponse: 成功レスポンス
-            - ErrorResponse: エラーレスポンス
-        end note
-    }
+    HTTPClient --> Router : HTTP POST\n/api/pc-info
+    Router --> Handler : リクエスト転送
+    Handler --> Model : パース・検証
+    Handler --> Repository : upsert(request)
+    Repository --> Model : マッピング
+    Repository --> DB : SQL実行\nSELECT/INSERT/UPDATE
 
-    ' リポジトリ
-    component "db/repository.rs\n【リポジトリ】" as Repository {
-        class "PcInfoRepository" {
-            - pool: MySqlPool
-            --
-            + new(pool: MySqlPool) -> Self
-            + find_by_uuid(uuid: &str) -> Result<Option<PcInfo>>
-            + create(request: &PcInfoRequest) -> Result<i32>
-            + update(id: i32, request: &PcInfoRequest) -> Result<()>
-            + upsert(request: &PcInfoRequest) -> Result<(String, i32)>
-        }
-
-        note right of PcInfoRepository
-            **役割**: データベースアクセス層
-            - SQLクエリ実行
-            - トランザクション管理
-            - UPSERT処理の実装
-              1. UUIDで既存レコード検索
-              2. 存在しない → INSERT（created_at, updated_at設定）
-              3. 存在する → UPDATE（updated_atのみ更新）
-        end note
-    }
-
-    ' APIハンドラー
-    component "handlers/pc_info.rs\n【APIハンドラー】" as Handler {
-        class "PcInfoHandler" {
-            + handle_pc_info(\n    State(repo),\n    Json(payload)\n) -> Result<Json<PcInfoResponse>>
-        }
-
-        note right of PcInfoHandler
-            **役割**: HTTPリクエスト処理
-            1. リクエストボディをパース（Json<PcInfoRequest>）
-            2. バリデーション（uuid必須等）
-            3. リポジトリ呼び出し（upsert）
-            4. レスポンス生成
-            5. エラーハンドリング（ステータスコード設定）
-        end note
-    }
-
-    ' ログ管理
-    component "logging.rs\n【ログ管理】" as Logging {
-        class "LoggingModule" {
-            + init_logging(config: &LoggingSettings)
-        }
-
-        note right of LoggingModule
-            **役割**: ログシステム初期化
-            - tracing-subscriberセットアップ
-            - ファイルローテーション
-            - ログレベル制御
-        end note
-    }
-
-    ' エラー処理
-    component "error.rs\n【エラー処理】" as Error {
-        class "ServerError" {
-            DatabaseError(sqlx::Error)
-            ConfigError(config::ConfigError)
-            InvalidRequest(String)
-            InternalError(String)
-        }
-
-        note right of ServerError
-            **役割**: 統一的なエラー型定義
-            - thiserrorマクロで実装
-            - Axum IntoResponseへの変換
-            - HTTPステータスコードマッピング
-        end note
-    }
-
-    ' Axumルーター
-    component "Axum Router\n【HTTPルーティング】" as Router {
-        note right of Router
-            **役割**: HTTPルーティング
-            - POST /api/pc-info → handle_pc_info
-            - ミドルウェア（TraceLayer等）
-            - Stateの共有（Repository）
-        end note
-    }
+    Handler ..> Error : エラー処理
+    Repository ..> Error : DBエラー
+    Config ..> Error : 設定エラー
 }
 
-' 外部依存
-database "MySQL/MariaDB\npc_inventory.pc_info" as DB
-cloud "HTTPクライアント" as HTTPClient
-
-' 呼び出し関係（エントリーポイントからの流れ）
-Main --> Config : "1. ServerConfig::load()\n設定ファイル読み込み"
-Main --> Logging : "2. init_logging()\nログ初期化"
-Main --> Repository : "3. MySqlPool::connect()\n   PcInfoRepository::new()\nDBプール作成"
-Main --> Router : "4. Router::new()\n   .route(\"/api/pc-info\", post(handle_pc_info))\n   .with_state(repository)\nルーティング設定"
-Main --> Router : "5. axum::Server::bind()\n   .serve(app)\nサーバー起動"
-
-HTTPClient --> Router : "HTTP POST /api/pc-info"
-Router --> Handler : "リクエスト転送"
-Handler --> Model : "リクエストパース・検証"
-Handler --> Repository : "upsert(request)"
-Repository --> Model : "PcInfo構造体へマッピング"
-Repository --> DB : "SQLクエリ実行\n（SELECT, INSERT, UPDATE）"
-
-Handler ..> Error : "エラー処理"
-Repository ..> Error : "DBエラー"
-Config ..> Error : "設定エラー"
-
-' main関数内の処理フロー
+' Processing Flow Details
 note bottom of Main
-    **main関数の処理フロー**
-    ====
-    ```rust
-    #[tokio::main]
-    async fn main() -> Result<()> {
-        // 1. 設定読み込み
-        let config = ServerConfig::load("config.toml")?;
-        info!("Configuration loaded");
+  **main関数の処理フロー**
+  ====
+  1. 設定読み込み: ServerConfig::load("config.toml")
+  2. ログ初期化: init_logging(&config.logging)
+  3. DBプール作成:
+     MySqlPoolOptions::new()
+       .max_connections(config.database.max_connections)
+       .connect_timeout(...)
+       .connect(&config.database.url).await
+  4. リポジトリ作成:
+     PcInfoRepository::new(pool)
+  5. Axumルーター構築:
+     Router::new()
+       .route("/api/pc-info", post(handle_pc_info))
+       .layer(TraceLayer::new_for_http())
+       .with_state(repository)
+  6. サーバー起動:
+     TcpListener::bind("0.0.0.0:8080")
+     axum::serve(listener, app).await
+end note
 
-        // 2. ログ初期化
-        init_logging(&config.logging);
-        info!("Starting PC Inventory Server...");
+note bottom of Handler
+  **handle_pc_info()の処理フロー**
+  ====
+  1. Axumが自動でJson<PcInfoRequest>にデシリアライズ
+  2. payload.validate()でバリデーション
+     - uuid必須チェック
+  3. State(repo)からリポジトリ取得
+  4. repo.upsert(&payload)実行
+     - 戻り値: (action, id)
+     - action: "created" | "updated"
+  5. PcInfoResponse構築
+     {
+       "status": "success",
+       "action": "created",
+       "id": 123
+     }
+  6. Json(response)を返す
+  7. エラー時: ServerError -> IntoResponse
+     - 400 Bad Request: InvalidRequest
+     - 500 Internal Server Error: DatabaseError
+end note
 
-        // 3. データベース接続プール作成
-        let pool = MySqlPoolOptions::new()
-            .max_connections(config.database.max_connections)
-            .connect_timeout(Duration::from_secs(config.database.connection_timeout_secs))
-            .idle_timeout(Duration::from_secs(config.database.idle_timeout_secs))
-            .connect(&config.database.url).await?;
-        info!("Database connection established");
+note bottom of Repository
+  **upsert()の処理詳細**
+  ====
+  UPSERT実装:
 
-        // 4. リポジトリ作成
-        let repository = PcInfoRepository::new(pool);
+  1. find_by_uuid(uuid)
+     SELECT * FROM pc_info
+     WHERE uuid = ? LIMIT 1
 
-        // 5. Axumルーター構築
-        let app = Router::new()
-            .route(&config.api.endpoint_path, post(handlers::pc_info::handle_pc_info))
-            .layer(TraceLayer::new_for_http())
-            .with_state(repository);
+  2. 結果が None の場合:
+     create(request)
+     INSERT INTO pc_info (
+       uuid, mac_address, network_type,
+       user_name, ip_address, os,
+       os_version, model_name,
+       created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+     → action = "created"
 
-        // 6. サーバー起動
-        let addr = format!("{}:{}", config.server.host, config.server.port);
-        let listener = tokio::net::TcpListener::bind(&addr).await?;
-        info!("Server listening on {}", addr);
-        info!("API endpoint: POST {}", config.api.endpoint_path);
+  3. 結果が Some(pc_info) の場合:
+     update(id, request)
+     UPDATE pc_info SET
+       mac_address = ?, network_type = ?,
+       user_name = ?, ip_address = ?,
+       os = ?, os_version = ?,
+       model_name = ?, updated_at = NOW()
+     WHERE id = ?
+     → action = "updated"
 
-        axum::serve(listener, app).await?;
-        Ok(())
-    }
-    ```
+  4. (action, id) を返す
+end note
 
-    **handle_pc_info() - APIハンドラー**
-    1. Axumが自動的にJson<PcInfoRequest>へデシリアライズ
-    2. payload.validate() でバリデーション
-    3. State(repo)からリポジトリを取得
-    4. repo.upsert(&payload) 実行
-       - 戻り値: (action: "created" | "updated", id: i32)
-    5. PcInfoResponse構築
-       ```rust
-       PcInfoResponse {
-           status: "success",
-           action: action,
-           id: id,
-       }
-       ```
-    6. Json(response)を返す → Axumが自動シリアライズ
-    7. エラー時はServerErrorを返す → IntoResponseで適切なHTTPステータスに変換
+note bottom of Model
+  **データモデル構造体**
+  ====
+  1. PcInfo (DBレコード)
+     - id, uuid, mac_address, network_type
+     - user_name, ip_address, os, os_version
+     - model_name, created_at, updated_at
+     - sqlx::FromRow派生
 
-    **upsert() - UPSERT処理**
-    1. SELECT * FROM pc_info WHERE uuid = ? LIMIT 1
-    2. 結果が None の場合:
-       ```sql
-       INSERT INTO pc_info (
-           uuid, mac_address, network_type, user_name,
-           ip_address, os, os_version, model_name,
-           created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-       ```
-       → action = "created"
-    3. 結果が Some(pc_info) の場合:
-       ```sql
-       UPDATE pc_info SET
-           mac_address = ?,
-           network_type = ?,
-           user_name = ?,
-           ip_address = ?,
-           os = ?,
-           os_version = ?,
-           model_name = ?,
-           updated_at = NOW()
-       WHERE id = ?
-       ```
-       → action = "updated"
-    4. 挿入/更新したIDを返す
+  2. PcInfoRequest (APIリクエスト)
+     - uuid, mac_address, network_type
+     - user_name, ip_address, os, os_version
+     - model_name
+     - serde::Deserialize派生
+     - validate()メソッド
 
-    **エラーハンドリング**
-    - ServerError → IntoResponse実装
-      - DatabaseError → 500 Internal Server Error
-      - ConfigError → 500 Internal Server Error
-      - InvalidRequest → 400 Bad Request
-      - InternalError → 500 Internal Server Error
-    - エラーレスポンスJSON:
-      ```json
-      {
-          "status": "error",
-          "message": "エラーメッセージ"
-      }
-      ```
+  3. PcInfoResponse (成功レスポンス)
+     - status: "success"
+     - action: "created" | "updated"
+     - id: i32
+     - serde::Serialize派生
+
+  4. ErrorResponse (エラーレスポンス)
+     - status: "error"
+     - message: String
+end note
+
+note bottom of DB
+  **データベース構造**
+  ====
+  テーブル: pc_info
+
+  制約:
+  - PRIMARY KEY: id
+  - UNIQUE: uuid
+    → 同じPCは1レコードのみ
+
+  インデックス:
+  - idx_uuid (uuid)
+  - idx_updated_at (updated_at)
+
+  UPSERT処理により:
+  - 初回: INSERT (created_at, updated_at設定)
+  - 2回目以降: UPDATE (updated_atのみ更新)
 end note
 
 @enduml

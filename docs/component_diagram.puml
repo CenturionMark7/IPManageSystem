@@ -1,268 +1,149 @@
-@startuml コンポーネント相関図 - クライアント側
+@startuml component_diagram_client
 
-title PC情報収集システム - クライアント側コンポーネント相関図
+title PC Inventory System - Client Component Diagram
 
-' スタイル
 skinparam componentStyle rectangle
-skinparam backgroundColor #FEFEFE
+skinparam rectangleFontSize 10
+skinparam noteFontSize 9
 
 package "pc-inventory-client" {
 
-    ' エントリーポイント
-    component "main.rs\n【エントリーポイント】" as Main {
-        port "main()" as MainFunc
+    ' Entry Point
+    rectangle "main.rs\n====\nエントリーポイント\n・非同期ランタイム起動\n・設定ファイル読み込み\n・ログシステム初期化\n・user_name検証\n・起動時処理実行\n・定期タイマー起動\n・リトライ管理" as Main #LightBlue
 
-        note right of MainFunc
-            **main関数の役割**
-            ====
-            1. 非同期ランタイム起動（#[tokio::main]）
-            2. 設定ファイル読み込み
-            3. ログシステム初期化
-            4. user_name検証
-            5. 起動時処理実行
-            6. 定期チェックタイマー起動
-            7. リトライ処理の管理
-        end note
-    }
+    ' Configuration
+    rectangle "config.rs\n====\n設定管理\n・ClientConfig構造体\n・load/save/update\n・TOML読み書き\n・自動更新項目管理" as Config #LightGreen
 
-    ' 設定管理
-    component "config.rs\n【設定管理】" as Config {
-        class "ClientConfig" {
-            + server: ServerSettings
-            + client: ClientSettings
-            + retry: RetrySettings
-            + pc_info: PcInfoSettings
-            + logging: LoggingSettings
-            --
-            + load(path: &str) -> Result<Self>
-            + save(&self, path: &str) -> Result<()>
-            + update_last_send_datetime(&mut self)
-            + update_pc_info(&mut self, wmi_info, net_info)
-        }
+    ' WMI Collector
+    rectangle "wmi/collector.rs\n====\nWMI情報収集\n・WmiCollector構造体\n・get_uuid()\n・get_model_name()\n・get_os_info()\n・Win32_BaseBoard\n・Win32_ComputerSystem\n・Win32_OperatingSystem" as WMI #LightYellow
 
-        note right of ClientConfig
-            **役割**: 全設定を保持・管理
-            - config.tomlから読み込み
-            - 自動更新項目の書き込み
-            - バリデーション
-        end note
-    }
+    ' Network Detector
+    rectangle "network/detector.rs\n====\nネットワーク検出\n・NetworkDetector構造体\n・get_active_adapter()\n・IPアドレス取得\n・MACアドレス取得\n・種別判定(Ethernet/Wi-Fi)\n・ループバック除外" as Network #LightYellow
 
-    ' WMI情報収集
-    component "wmi/collector.rs\n【WMI情報収集】" as WMI {
-        class "WmiCollector" {
-            - wmi_con: WMIConnection
-            --
-            + new() -> Result<Self>
-            + get_uuid() -> Result<String>
-            + get_model_name() -> Result<String>
-            + get_os_info() -> Result<(String, String)>
-        }
+    ' API Client
+    rectangle "api/client.rs\n====\nAPI通信\n・ApiClient構造体\n・send_pc_info()\n・POST /api/pc-info\n・JSON送受信\n・タイムアウト制御\n・reqwest使用" as ApiClient #LightCyan
 
-        class "WmiInfo" {
-            + uuid: String
-            + model_name: String
-            + os: String
-            + os_version: String
-        }
+    ' Logging
+    rectangle "logging.rs\n====\nログ管理\n・init_logging()\n・tracing-subscriber\n・ファイルローテーション\n・ログレベル制御\n・client.log出力" as Logging #LightGray
 
-        note right of WmiCollector
-            **役割**: Windows WMIからPC情報取得
-            - Win32_BaseBoard.SerialNumber → UUID
-            - Win32_ComputerSystem.Model → 機種名
-            - Win32_OperatingSystem → OS情報
-        end note
-    }
+    ' Error Handling
+    rectangle "error.rs\n====\nエラー処理\n・ClientError列挙型\n・ConfigError\n・WmiError\n・NetworkError\n・ApiError\n・thiserrorマクロ" as Error #LightPink
 
-    ' ネットワーク検出
-    component "network/detector.rs\n【ネットワーク検出】" as Network {
-        class "NetworkDetector" {
-            + get_active_adapter() -> Result<NetworkInfo>
-            - format_mac_address(mac: &str) -> String
-            - detect_network_type(name: &str) -> String
-        }
-
-        class "NetworkInfo" {
-            + ip_address: String
-            + mac_address: String
-            + network_type: String
-        }
-
-        note right of NetworkDetector
-            **役割**: アクティブなネットワークアダプタ検出
-            - IPv4アドレス取得
-            - MACアドレス取得（LANモジュール）
-            - ネットワーク種別判定（Ethernet/Wi-Fi）
-            - ループバック・リンクローカルは除外
-        end note
-    }
-
-    ' API通信
-    component "api/client.rs\n【API通信】" as ApiClient {
-        class "ApiClient" {
-            - client: reqwest::Client
-            - server_url: String
-            --
-            + new(url, timeout) -> Result<Self>
-            + send_pc_info(data: &PcInfoData) -> Result<ApiResponse>
-        }
-
-        class "PcInfoData" {
-            + uuid: String
-            + mac_address: String
-            + network_type: String
-            + user_name: String
-            + ip_address: String
-            + os: String
-            + os_version: String
-            + model_name: String
-        }
-
-        class "ApiResponse" {
-            + status: String
-            + action: String
-            + id: i32
-        }
-
-        note right of ApiClient
-            **役割**: サーバーへのHTTP通信
-            - POST /api/pc-info
-            - JSON送受信
-            - タイムアウト制御
-            - エラーハンドリング
-        end note
-    }
-
-    ' ログ管理
-    component "logging.rs\n【ログ管理】" as Logging {
-        class "LoggingModule" {
-            + init_logging(config: &LoggingSettings)
-        }
-
-        note right of LoggingModule
-            **役割**: ログシステム初期化
-            - tracing-subscriberセットアップ
-            - ファイルローテーション
-            - ログレベル制御
-        end note
-    }
-
-    ' エラー処理
-    component "error.rs\n【エラー処理】" as Error {
-        class "ClientError" {
-            ConfigError(String)
-            WmiError(String)
-            NetworkError(String)
-            ApiError(reqwest::Error)
-            IoError(std::io::Error)
-            MissingField(String)
-        }
-
-        note right of ClientError
-            **役割**: 統一的なエラー型定義
-            - thiserrorマクロで実装
-            - 各エラーソースから変換
-            - エラーメッセージの一元管理
-        end note
-    }
-}
-
-' 外部依存
-cloud "外部システム" {
+    ' External Systems
     database "Windows WMI" as WindowsWMI
     database "Network Interfaces" as NetIF
     cloud "HTTP Server" as HTTPServer
+
+    ' Call Flow from Entry Point
+    Main --> Config : 1. load()\n設定読み込み
+    Main --> Logging : 2. init_logging()\nログ初期化
+    Main --> WMI : 3. WmiCollector::new()\nget_uuid/model/os\nWMI情報収集
+    Main --> Network : 4. get_active_adapter()\nネットワーク情報取得
+    Main --> Config : 5. update_pc_info()\nsave()\n設定ファイル更新
+    Main --> ApiClient : 6. send_pc_info()\nサーバー送信
+    Main --> Config : 7. update_last_send_datetime()\nsave()\n送信日時更新
+
+    WMI --> WindowsWMI : WMIクエリ
+    Network --> NetIF : インターフェース取得
+    ApiClient --> HTTPServer : HTTP POST
+
+    Main ..> Error : エラー処理
+    Config ..> Error : 設定エラー
+    WMI ..> Error : WMIエラー
+    Network ..> Error : ネットワークエラー
+    ApiClient ..> Error : APIエラー
 }
 
-' 呼び出し関係（エントリーポイントからの流れ）
-Main --> Config : "1. load()\n設定ファイル読み込み"
-Main --> Logging : "2. init_logging()\nログ初期化"
-Main --> WMI : "3. WmiCollector::new()\n   get_uuid()\n   get_model_name()\n   get_os_info()\nWMI情報収集"
-Main --> Network : "4. NetworkDetector::\n   get_active_adapter()\nネットワーク情報取得"
-Main --> Config : "5. update_pc_info()\n   save()\n設定ファイル更新"
-Main --> ApiClient : "6. ApiClient::new()\n   send_pc_info()\nサーバーへ送信"
-Main --> Config : "7. update_last_send_datetime()\n   save()\n送信日時更新"
-
-WMI --> WindowsWMI : "WMIクエリ実行"
-Network --> NetIF : "ネットワークインターフェース取得"
-ApiClient --> HTTPServer : "HTTP POST"
-
-Main ..> Error : "エラー処理"
-Config ..> Error : "設定エラー"
-WMI ..> Error : "WMIエラー"
-Network ..> Error : "ネットワークエラー"
-ApiClient ..> Error : "APIエラー"
-
-' main関数内の処理フロー
+' Processing Flow Details
 note bottom of Main
-    **main関数の処理フロー**
-    ====
-    ```rust
-    #[tokio::main]
-    async fn main() -> Result<()> {
-        // 1. 設定読み込み
-        let config = ClientConfig::load("config.toml")?;
+  **main関数の処理フロー**
+  ====
+  1. 設定読み込み: ClientConfig::load("config.toml")
+  2. ログ初期化: init_logging(&config.logging)
+  3. user_name検証: 空欄チェック
+  4. リトライフラグ初期化: Arc<Mutex<bool>>
+  5. 起動時処理: initial_process()
+     - WMI情報収集
+     - ネットワーク検出
+     - 設定更新
+     - サーバー送信
+  6. 定期チェックタイマー: tokio::interval
+     - 送信間隔経過後に送信
+  7. リトライサイクル: start_retry_cycle()
+     - 送信失敗時に開始
+end note
 
-        // 2. ログ初期化
-        init_logging(&config.logging);
-        info!("PC Inventory Client starting...");
+note bottom of Config
+  **ClientConfig構造体**
+  ====
+  含まれる設定:
+  - server: ServerSettings (URL, timeout)
+  - client: ClientSettings (send_interval_hours)
+  - retry: RetrySettings (delay_secs)
+  - pc_info: PcInfoSettings (user_name, UUID, MAC等)
+  - logging: LoggingSettings (level, file_path)
 
-        // 3. user_name検証
-        if config.pc_info.user_name.trim().is_empty() {
-            error!("user_name is required");
-            return Err(...);
-        }
+  主要メソッド:
+  - load(path) -> config.tomlから読み込み
+  - save(path) -> config.tomlへ書き込み
+  - update_pc_info() -> WMI/Network情報を反映
+  - update_last_send_datetime() -> 送信日時を更新
+end note
 
-        // 4. リトライフラグ初期化
-        let is_retrying = Arc::new(Mutex::new(false));
+note bottom of WMI
+  **WMI情報取得の詳細**
+  ====
+  1. UUID取得:
+     Win32_BaseBoard.SerialNumber
+     → マザーボードのシリアル番号
+     → PC固有の識別子
 
-        // 5. 起動時処理
-        if let Err(e) = initial_process(&mut config, &config_path).await {
-            error!("Initial process failed: {}", e);
-            // リトライサイクル開始
-            start_retry_cycle(is_retrying.clone(), config_path.clone()).await;
-        }
+  2. 機種名取得:
+     Win32_ComputerSystem.Model
+     → 例: "ThinkPad X1 Carbon"
 
-        // 6. 定期チェックタイマー起動
-        let mut timer = interval(Duration::from_secs(check_interval_secs));
-        loop {
-            timer.tick().await;
-            periodic_check(&mut config, &config_path, is_retrying.clone()).await;
-        }
-    }
-    ```
+  3. OS情報取得:
+     Win32_OperatingSystem.Caption
+     Win32_OperatingSystem.Version
+     → 例: "Windows 11 Pro", "10.0.22631"
+end note
 
-    **initial_process() - 起動時処理**
-    1. WmiCollector::new() → WMI接続
-    2. collector.get_uuid() → UUID取得
-    3. collector.get_model_name() → 機種名取得
-    4. collector.get_os_info() → OS情報取得
-    5. NetworkDetector::get_active_adapter() → ネットワーク情報取得
-    6. config.update_pc_info() → 設定に反映
-    7. config.save() → 設定ファイル保存
-    8. ApiClient::send_pc_info() → サーバー送信
-    9. config.update_last_send_datetime() → 送信日時更新
-    10. config.save() → 再保存
+note bottom of Network
+  **ネットワーク検出の詳細**
+  ====
+  1. アクティブアダプタ検出:
+     - IPv4アドレスを持つインターフェースを検索
+     - ループバック(127.0.0.1)除外
+     - リンクローカル(169.254.x.x)除外
 
-    **periodic_check() - 定期チェック**
-    1. 前回送信から送信間隔経過したか確認
-    2. 経過していれば send_pc_info() 実行
-    3. 失敗時は何もしない（リトライサイクルが別途動作）
+  2. MACアドレス:
+     - ネットワークアダプタのMAC取得
+     - フォーマット: "00:11:22:33:44:55"
 
-    **start_retry_cycle() - リトライサイクル開始**
-    1. is_retyring フラグをチェック（二重起動防止）
-    2. フラグを true に設定
-    3. 別タスク（tokio::spawn）でリトライ処理開始
+  3. ネットワーク種別:
+     - アダプタ名に"Ethernet"含む → "Ethernet"
+     - アダプタ名に"Wi-Fi"含む → "Wi-Fi"
+     - その他 → "Unknown"
+end note
 
-    **handle_retry_cycle() - リトライサイクル処理**
-    1. RetryState::FirstRetry から開始
-    2. first_retry_delay_secs 待機
-    3. retry_send() 実行
-    4. 成功 → is_retrying を false にして終了
-    5. 失敗 → RetryState::SecondRetry に遷移
-    6. second_retry_delay_secs 待機
-    7. retry_send() 実行
-    8. 成功 → 終了、失敗 → FirstRetry に戻る（ループ）
+note bottom of ApiClient
+  **リトライサイクルの詳細**
+  ====
+  送信失敗時の動作:
+
+  1. start_retry_cycle()
+     - is_retrying フラグチェック(二重起動防止)
+     - フラグを true に設定
+     - tokio::spawnで別タスク起動
+
+  2. handle_retry_cycle()
+     - RetryState::FirstRetry
+       → 15分待機 → retry_send()
+     - 成功 → 終了
+     - 失敗 → RetryState::SecondRetry
+       → 1時間待機 → retry_send()
+     - 成功 → 終了
+     - 失敗 → FirstRetry に戻る(ループ)
 end note
 
 @enduml
