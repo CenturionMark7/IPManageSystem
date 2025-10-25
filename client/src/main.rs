@@ -9,9 +9,18 @@ use config::ClientConfig;
 use network::NetworkDetector;
 use wmi::WmiCollector;
 use chrono::Utc;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, sleep, Duration};
 use tracing::{info, warn, error, debug};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+/// リトライ状態
+#[derive(Debug, Clone, Copy)]
+enum RetryState {
+    FirstRetry,
+    SecondRetry,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -34,10 +43,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("User name is required".into());
     }
 
+    // リトライ中フラグ（スレッド間で共有）
+    let is_retrying = Arc::new(Mutex::new(false));
+
     // 起動時処理
     if let Err(e) = initial_process(&mut config, &config_path).await {
         error!("Initial process failed: {}", e);
-        // 起動時エラーは致命的ではないため、継続
+        // 送信失敗時はリトライサイクルを開始
+        start_retry_cycle(is_retrying.clone(), config_path.clone()).await;
     }
 
     // 定期チェックタイマー
@@ -65,6 +78,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("Send interval elapsed, sending PC info");
             if let Err(e) = periodic_check(&mut config, &config_path).await {
                 error!("Periodic check failed: {}", e);
+                // 送信失敗時はリトライサイクルを開始
+                start_retry_cycle(is_retrying.clone(), config_path.clone()).await;
             }
         } else {
             debug!("Send interval not elapsed yet, skipping");
@@ -231,4 +246,144 @@ async fn should_send(config: &ClientConfig) -> bool {
             true
         }
     }
+}
+
+/// リトライサイクルを開始
+///
+/// 既にリトライ中でない場合のみ、新しいリトライタスクをspawnします。
+async fn start_retry_cycle(is_retrying: Arc<Mutex<bool>>, config_path: String) {
+    let mut retrying = is_retrying.lock().await;
+
+    // 既にリトライ中の場合は何もしない
+    if *retrying {
+        debug!("Already retrying, skipping new retry cycle");
+        return;
+    }
+
+    // リトライ開始
+    *retrying = true;
+    drop(retrying); // ロックを解放
+
+    info!("Starting retry cycle");
+
+    // リトライタスクをspawn
+    let is_retrying_clone = is_retrying.clone();
+    tokio::spawn(async move {
+        handle_retry_cycle(is_retrying_clone, config_path).await;
+    });
+}
+
+/// リトライサイクル処理
+///
+/// first_retry_delay_secs → second_retry_delay_secs を交互に繰り返します。
+async fn handle_retry_cycle(is_retrying: Arc<Mutex<bool>>, config_path: String) {
+    let mut state = RetryState::FirstRetry;
+
+    loop {
+        // 設定を読み込み
+        let config = match ClientConfig::load(&config_path) {
+            Ok(c) => c,
+            Err(e) => {
+                error!("Failed to load config during retry: {}", e);
+                sleep(Duration::from_secs(60)).await; // エラー時は1分待機
+                continue;
+            }
+        };
+
+        // 待機時間を決定
+        let delay_secs = match state {
+            RetryState::FirstRetry => config.retry.first_retry_delay_secs,
+            RetryState::SecondRetry => config.retry.second_retry_delay_secs,
+        };
+
+        info!("Retry scheduled in {} seconds (state: {:?})", delay_secs, state);
+        sleep(Duration::from_secs(delay_secs)).await;
+
+        // リトライ送信
+        info!("Attempting retry send (state: {:?})", state);
+
+        match retry_send(&config, &config_path).await {
+            Ok(_) => {
+                info!("Retry send successful, exiting retry cycle");
+                // 成功したのでリトライフラグをfalseに
+                let mut retrying = is_retrying.lock().await;
+                *retrying = false;
+                break;
+            }
+            Err(e) => {
+                error!("Retry send failed: {}", e);
+                // 次の状態に遷移
+                state = match state {
+                    RetryState::FirstRetry => RetryState::SecondRetry,
+                    RetryState::SecondRetry => RetryState::FirstRetry,
+                };
+            }
+        }
+    }
+}
+
+/// リトライ送信
+///
+/// ネットワーク情報を再取得してサーバーに送信します。
+async fn retry_send(_config: &ClientConfig, config_path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    info!("Collecting information for retry send");
+
+    // ネットワーク情報を再取得
+    let network_info = NetworkDetector::get_active_adapter()?;
+
+    debug!("Network information updated:");
+    debug!("  IP: {}", network_info.ip_address);
+    debug!("  MAC: {}", network_info.mac_address);
+    debug!("  Type: {}", network_info.network_type);
+
+    // 設定を再読み込みして最新の情報を取得
+    let mut config = ClientConfig::load(config_path)?;
+
+    // ネットワーク情報を更新
+    config.pc_info.ip_address = network_info.ip_address;
+    config.pc_info.mac_address = network_info.mac_address;
+    config.pc_info.network_type = network_info.network_type;
+
+    // PC情報が完全でない場合はエラー
+    if !config.is_pc_info_complete() {
+        warn!("PC information is incomplete, cannot retry send");
+        return Err("PC information is incomplete".into());
+    }
+
+    // APIクライアント作成
+    let api_client = ApiClient::new(
+        config.server.url.clone(),
+        config.server.request_timeout_secs,
+    )?;
+
+    // 送信データ作成
+    let data = PcInfoData {
+        uuid: config.pc_info.uuid.clone(),
+        mac_address: config.pc_info.mac_address.clone(),
+        network_type: config.pc_info.network_type.clone(),
+        user_name: config.pc_info.user_name.clone(),
+        ip_address: config.pc_info.ip_address.clone(),
+        os: config.pc_info.os.clone(),
+        os_version: config.pc_info.os_version.clone(),
+        model_name: config.pc_info.model_name.clone(),
+    };
+
+    // データ検証
+    data.validate()?;
+
+    // 送信
+    info!("Sending PC information to server (retry)");
+    let response = api_client.send_pc_info(&data).await?;
+
+    info!("Server response: {} (action: {}, id: {})",
+        response.status, response.action, response.id);
+
+    // 最終送信日時を更新
+    let now = Utc::now().to_rfc3339();
+    config.update_last_send_datetime(now);
+    config.save(config_path)?;
+
+    info!("Last send datetime updated in config");
+
+    Ok(())
 }

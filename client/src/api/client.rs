@@ -87,7 +87,7 @@ impl ApiClient {
     /// - サーバーエラー（4xx, 5xx）
     /// - レスポンスのパースエラー
     pub async fn send_pc_info(&self, data: &PcInfoData) -> Result<ApiResponse> {
-        let url = format!("{}/api/pc-info", self.server_url);
+        let url = &self.server_url;
 
         tracing::info!("Sending PC info to server");
         tracing::debug!("  URL: {}", url);
@@ -97,7 +97,7 @@ impl ApiClient {
 
         let response = self
             .client
-            .post(&url)
+            .post(url)
             .json(data)
             .send()
             .await
