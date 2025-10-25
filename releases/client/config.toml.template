@@ -1,0 +1,54 @@
+# PC情報収集システム クライアント側設定ファイル
+# バージョン: 2.1
+
+[server]
+# サーバーのURL（ベースURLのみ、エンドポイントパスは不要）
+# 例: http://192.168.1.10:8080
+url = "http://localhost:8080"
+request_timeout_secs = 30
+
+[client]
+# 最終送信日時（自動更新されます）
+last_send_datetime = ""
+
+# チェック間隔（秒） - 定期的にタイマーで確認する間隔
+# デフォルト: 3600秒 = 1時間
+check_interval_secs = 3600
+
+# 送信間隔（秒） - この時間が経過したら再送信
+# デフォルト: 21600秒 = 6時間
+send_interval_secs = 21600
+
+[retry]
+# 送信失敗時の1回目リトライまでの待機時間（秒）
+# デフォルト: 900秒 = 15分
+first_retry_delay_secs = 900
+
+# 送信失敗時の2回目リトライまでの待機時間（秒）
+# デフォルト: 3600秒 = 1時間
+second_retry_delay_secs = 3600
+
+[pc_info]
+# 使用者名（必須 - 初回起動前に必ず入力してください）
+user_name = ""
+
+# 以下の項目は自動取得されるため、空白のままにしてください
+uuid = ""
+mac_address = ""
+network_type = ""
+ip_address = ""
+os = ""
+os_version = ""
+model_name = ""
+
+[logging]
+# ログレベル: trace, debug, info, warn, error
+level = "info"
+file = "client.log"
+max_file_size_mb = 50
+max_backup_files = 3
+
+# Future: セキュリティ設定（将来対応）
+# [security]
+# enable_tls = false
+# encryption_key = ""
